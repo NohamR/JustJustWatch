@@ -3,13 +3,9 @@
 This project pulls data from [JustWatch](https://www.justwatch.com/) and shows details about movies and series.
 
 ## Installation
+This project uses [uv](https://docs.astral.sh/uv/) as a package manager.
 ```bash
-pip install -r requirements.txt
-```
-
-## Usage
-```bash
-python info.py
+uv run main.py
 ```
 
 
