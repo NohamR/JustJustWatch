@@ -1,5 +1,8 @@
-import requests
+"""JustWatch availability checker for Plex/Free offers across countries."""
+
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+import requests
 from tqdm import tqdm
 from tabulate import tabulate
 from InquirerPy import inquirer
@@ -7,10 +10,12 @@ from InquirerPy.base.control import Choice
 
 
 def country_code_to_flag(code):
+    """Convert ISO 3166-1 alpha-2 country code to regional indicator emoji."""
     return chr(127462 + ord(code[0]) - ord("A")) + chr(127462 + ord(code[1]) - ord("A"))
 
 
 def format_countries(country_codes):
+    """Format a list of country codes into a human-readable string with flags."""
     representative_flags = ["FR", "GB", "US", "DE"]
     selected_countries = [
         code for code in country_codes if code in representative_flags
@@ -21,20 +26,16 @@ def format_countries(country_codes):
             code for code in country_codes if code not in selected_countries
         ][: 4 - len(selected_countries)]
 
+    formatted = ", ".join(
+        [f"{country_code_to_flag(code)} {code}" for code in selected_countries]
+    )
     if len(country_codes) > len(selected_countries):
-        return (
-            ", ".join(
-                [f"{country_code_to_flag(code)} {code}" for code in selected_countries]
-            )
-            + f" + {len(country_codes) - len(selected_countries)} more"
-        )
-    else:
-        return ", ".join(
-            [f"{country_code_to_flag(code)} {code}" for code in selected_countries]
-        )
+        formatted += f" + {len(country_codes) - len(selected_countries)} more"
+    return formatted
 
 
 def update_url_query(url):
+    """Remove UTM tracking parameters from a URL query string."""
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     keys_to_remove = [
@@ -59,10 +60,31 @@ def update_url_query(url):
     )
 
 
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+)
+TITLE_DETAILS_QUERY = (
+    "query GetUrlTitleDetails($fullPath: String!, $country: Country!, "
+    "$language: Language!, $episodeMaxLimit: Int, $platform: Platform! = WEB, "
+    "$allowSponsoredRecommendations: SponsoredRecommendationsInput, "
+    "$format: ImageFormat, $backdropProfile: BackdropProfile, "
+    "$streamingChartsFilter: StreamingChartsFilter) {\n"
+    "  urlV2(fullPath: $fullPath) {\n    node {\n      ...TitleDetails\n"
+    "      __typename\n    }\n    __typename\n  }\n}\n\n"
+    "fragment TitleDetails on Node {\n"
+    "  ... on MovieOrShowOrSeason {\n"
+    '    plexPlayerOffers: offers(country: $country, platform: $platform, '
+    'filter: {packages: ["pxp"]}) {\n'
+    "      id\n      standardWebURL\n"
+    "      package { id packageId clearName technicalName shortName __typename }\n"
+    "      __typename\n    }\n  }\n}"
+)
+
+
 def search(query):
-    headers = {
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-    }
+    """Search for a title on JustWatch and let the user select one."""
+    headers = {"user-agent": USER_AGENT}
     json_data = {
         "operationName": "GetSuggestedTitles",
         "variables": {
@@ -74,11 +96,30 @@ def search(query):
                 "includeTitlesWithoutUrl": True,
             },
         },
-        "query": "query GetSuggestedTitles($country: Country!, $language: Language!, $first: Int!, $filter: TitleFilter) {\n  popularTitles(country: $country, first: $first, filter: $filter) {\n    edges {\n      node {\n        ...SuggestedTitle\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment SuggestedTitle on MovieOrShow {\n  __typename\n  id\n  objectType\n  objectId\n  content(country: $country, language: $language) {\n    fullPath\n    title\n    originalReleaseYear\n    posterUrl\n    __typename\n  }\n  watchNowOffer(country: $country, platform: WEB) {\n    id\n    standardWebURL\n    package {\n      id\n      packageId\n      __typename\n    }\n    __typename\n  }\n  offers(country: $country, platform: WEB) {\n    monetizationType\n    presentationType\n    standardWebURL\n    package {\n      id\n      packageId\n      __typename\n    }\n    id\n    __typename\n  }\n}\n",
+        "query": (
+            "query GetSuggestedTitles($country: Country!, $language: Language!, "
+            "$first: Int!, $filter: TitleFilter) {\n"
+            "  popularTitles(country: $country, first: $first, filter: $filter) {\n"
+            "    edges {\n      node {\n        ...SuggestedTitle\n        __typename\n"
+            "      }\n      __typename\n    }\n    __typename\n  }\n}\n\n"
+            "fragment SuggestedTitle on MovieOrShow {\n"
+            "  __typename\n  id\n  objectType\n  objectId\n"
+            "  content(country: $country, language: $language) {\n"
+            "    fullPath\n    title\n    originalReleaseYear\n    posterUrl\n"
+            "    __typename\n  }\n"
+            "  watchNowOffer(country: $country, platform: WEB) {\n"
+            "    id\n    standardWebURL\n    package {\n      id\n      packageId\n"
+            "      __typename\n    }\n    __typename\n  }\n"
+            "  offers(country: $country, platform: WEB) {\n"
+            "    monetizationType\n    presentationType\n    standardWebURL\n"
+            "    package {\n      id\n      packageId\n      __typename\n    }\n"
+            "    id\n    __typename\n  }\n}\n"
+        ),
     }
 
     response = requests.post(
-        "https://apis.justwatch.com/graphql", headers=headers, json=json_data
+        "https://apis.justwatch.com/graphql",
+        headers=headers, json=json_data, timeout=30
     ).json()
     choices = []
 
@@ -113,21 +154,19 @@ def search(query):
 
 
 def fetchdata(path):
-    headers = {
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-    }
+    """Fetch Plex/Free offer availability for a title across all countries."""
+    headers = {"user-agent": USER_AGENT}
     countries = [
         country["iso_3166_2"]
         for country in requests.get(
-            "https://apis.justwatch.com/content/locales/state", headers=headers
+            "https://apis.justwatch.com/content/locales/state",
+            headers=headers, timeout=30
         ).json()
     ]
 
     print(f"Checking {len(countries)} countries...")
-    SERVICES = {}
-    IDS = []
-
-    query_str = 'query GetUrlTitleDetails($fullPath: String!, $country: Country!, $language: Language!, $episodeMaxLimit: Int, $platform: Platform! = WEB, $allowSponsoredRecommendations: SponsoredRecommendationsInput, $format: ImageFormat, $backdropProfile: BackdropProfile, $streamingChartsFilter: StreamingChartsFilter) {\n  urlV2(fullPath: $fullPath) {\n    node {\n      ...TitleDetails\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment TitleDetails on Node {\n  ... on MovieOrShowOrSeason {\n    plexPlayerOffers: offers(country: $country, platform: $platform, filter: {packages: ["pxp"]}) {\n      id\n      standardWebURL\n      package { id packageId clearName technicalName shortName __typename }\n      __typename\n    }\n  }\n}'
+    services = {}
+    ids = []
 
     for country in tqdm(countries, desc="Fetching Availability"):
         json_data = {
@@ -139,17 +178,17 @@ def fetchdata(path):
                 "country": country,
                 "episodeMaxLimit": 100,
             },
-            "query": query_str,
+            "query": TITLE_DETAILS_QUERY,
         }
 
         try:
             res = requests.post(
-                "https://apis.justwatch.com/graphql", headers=headers, json=json_data
+                "https://apis.justwatch.com/graphql",
+                headers=headers, json=json_data, timeout=30
             ).json()
+            data = res.get("data")
             offers = (
-                res.data["urlV2"]["node"].get("plexPlayerOffers", [])
-                if res.get("data")
-                else []
+                data["urlV2"]["node"].get("plexPlayerOffers", []) if data else []
             )
 
             for offer in offers:
@@ -157,27 +196,27 @@ def fetchdata(path):
                 url = update_url_query(offer["standardWebURL"])
                 pkg_id = offer["package"]["id"]
 
-                if pkg_id not in IDS:
-                    IDS.append(pkg_id)
-                    SERVICES[service] = {
+                if pkg_id not in ids:
+                    ids.append(pkg_id)
+                    services[service] = {
                         "id": pkg_id,
                         "service": service,
                         "url": url,
                         "countries": [country],
                     }
                 else:
-                    if country not in SERVICES[service]["countries"]:
-                        SERVICES[service]["countries"].append(country)
-        except:
+                    if country not in services[service]["countries"]:
+                        services[service]["countries"].append(country)
+        except (KeyError, TypeError, requests.RequestException):
             continue
 
-    if not SERVICES:
+    if not services:
         print("\nNo Plex/Free offers found globally.")
         return
 
     table_data = [
         [details["service"], format_countries(details["countries"]), details["url"]]
-        for details in SERVICES.values()
+        for details in services.values()
     ]
     print(
         "\n"
@@ -185,7 +224,12 @@ def fetchdata(path):
     )
 
 
-if __name__ == "__main__":
+def main():
+    """Prompt the user for a query and search JustWatch."""
     user_query = inquirer.text(message="Enter the movie/show to search:").execute()
     if user_query:
         search(user_query)
+
+
+if __name__ == "__main__":
+    main()

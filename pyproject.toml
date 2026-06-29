@@ -1,7 +1,7 @@
 [project]
 name = "justjustwatch"
 version = "0.1.0"
-description = "Add your description here"
+description = "CLI tool to search movies and shows availability on JustWatch"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,4 +9,9 @@ dependencies = [
     "requests>=2.34.2",
     "tabulate>=0.9.0",
     "tqdm>=4.68.3",
+]
+
+[dependency-groups]
+dev = [
+    "pylint>=3.3.9",
 ]
